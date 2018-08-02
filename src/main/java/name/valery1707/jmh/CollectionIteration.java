@@ -1,5 +1,6 @@
 package name.valery1707.jmh;
 
+import name.valery1707.Utils;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.BenchmarkParams;
 import org.openjdk.jmh.infra.Blackhole;
@@ -9,9 +10,18 @@ import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.runner.options.TimeValue;
 
-import java.util.Collection;
-import java.util.Iterator;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.URI;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.stream.Collectors.joining;
 
 @SuppressWarnings("DefaultAnnotationParam")
 @BenchmarkMode(Mode.AverageTime)
@@ -192,5 +202,79 @@ public class CollectionIteration {
                 .measurementTime(TimeValue.seconds(1))
                 .build();
         new Runner(opt).run();
+    }
+
+    public static class MarkdownFormatter {
+        /**
+         * <pre><code>
+         * CollectionIteration.benchmark_1             java.util.HashSet  forWithoutCache  avgt    5  14,517 ± 1,909  ns/op
+         * </code></pre>
+         */
+        private static final Pattern DATA_LINE_PATTERN = Pattern.compile(""
+                + "^"
+                + "CollectionIteration.benchmark_([\\d_]+)"         //size
+                + "\\s+"
+                + "([\\w.]+)"                                       //clazz
+                + "\\s+"
+                + "([\\w.]+)"                                       //mode
+                + "\\s+"
+                + "([\\w.]+)"                                       //benchmarkMode
+                + "\\s+"
+                + "([\\d]+)"                                        //measureIterations
+                + "\\s+"
+                + "(([\\d,.]+)\\s+(.)\\s+([\\d,.]+)\\s+([\\w/]+))"    //value
+                + "$"
+        );
+
+        public static void main(String[] args) throws IOException {
+            URI uri = URI.create("https://gist.githubusercontent.com/valery1707/d9e5b7db6bcdbf1a273f7ab76732cf92/raw/b6c31dca06734e9bec12f0f8d3bdfa45921438de/Result_8721f00_2018-08-01.txt");
+            try (
+                    InputStream inputStream = uri.toURL().openStream();
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, UTF_8));
+            ) {
+                Map<String, Map<String, Map<Integer, String>>> valueBySizeByModeByClazz = Utils
+                        .toStream(reader, MarkdownFormatter::readLine)
+                        .map(DATA_LINE_PATTERN::matcher)
+                        .filter(Matcher::matches)
+                        .collect(
+                                LinkedHashMap::new,
+                                (map, matcher) -> map
+                                        .computeIfAbsent(matcher.group(2), __ -> new LinkedHashMap<>())
+                                        .computeIfAbsent(matcher.group(3), __ -> new TreeMap<>())
+                                        .computeIfAbsent(Integer.valueOf(matcher.group(1).replaceAll("_", "")), __ ->
+                                                matcher.group(7) + matcher.group(8) + matcher.group(9)
+                                        ),
+                                (mapL, mapR) -> {
+                                }
+                        );
+                Set<Integer> sizes = valueBySizeByModeByClazz
+                        .values().iterator().next()
+                        .values().iterator().next()
+                        .keySet();
+                String header = sizes
+                        .stream()
+                        .map(Object::toString)
+                        .collect(joining(" | ", "| Collection | Iteration | ", " |"));
+                String split = Collections.nCopies(sizes.size() + 2, "-------------").stream().collect(joining(" | ", "| ", " |"));
+                System.out.println(header);
+                System.out.println(split);
+                valueBySizeByModeByClazz.forEach((clazz, valueBySizeByMode) ->
+                        valueBySizeByMode.forEach((mode, valueBySize) -> {
+                            System.out.print(String.format("| %s | %s | ", clazz, mode));
+                            valueBySize.forEach((size, value) ->
+                                    System.out.print(String.format("%s |", value))
+                            );
+                            System.out.println();
+                        }));
+            }
+        }
+
+        private static Optional<String> readLine(BufferedReader reader) {
+            try {
+                return Optional.ofNullable(reader.readLine());
+            } catch (IOException e) {
+                throw new IllegalStateException("IO exception in readLine", e);
+            }
+        }
     }
 }
